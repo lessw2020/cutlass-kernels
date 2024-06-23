@@ -19,22 +19,16 @@ set(PYTHON_SUPPORTED_VERSIONS "3.8" "3.9" "3.10" "3.11")
 # Supported NVIDIA architectures.
 set(CUDA_SUPPORTED_ARCHS "7.0;7.5;8.0;8.6;8.9;9.0")
 
-# Supported AMD GPU architectures.
-set(HIP_SUPPORTED_ARCHS "gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx1030;gfx1100")
-
 #
-# Supported/expected torch versions for CUDA/ROCm.
+# Supported/expected torch versions for CUDA.
 #
 # Currently, having an incorrect pytorch version results in a warning
 # rather than an error.
 #
 # Note: the CUDA torch version is derived from pyproject.toml and various
-# requirements.txt files and should be kept consistent.  The ROCm torch
-# versions are derived from Dockerfile.rocm
+# requirements.txt files and should be kept consistent.
 #
 set(TORCH_SUPPORTED_VERSION_CUDA "2.3.0")
-set(TORCH_SUPPORTED_VERSION_ROCM_5X "2.0.1")
-set(TORCH_SUPPORTED_VERSION_ROCM_6X "2.1.1")
 
 #
 # Try to find python package with an executable that exactly matches
@@ -61,7 +55,7 @@ endif()
 
 #
 # Import torch cmake configuration.
-# Torch also imports CUDA (and partially HIP) languages with some customizations,
+# Torch also imports CUDA language with some customizations,
 # so there is no need to do this explicitly with check_language/enable_language,
 # etc.
 #
@@ -70,8 +64,7 @@ find_package(Torch REQUIRED)
 #
 # Forward the non-CUDA device extensions to external CMake scripts.
 #
-if (NOT VLLM_TARGET_DEVICE STREQUAL "cuda" AND
-    NOT VLLM_TARGET_DEVICE STREQUAL "rocm")
+if (NOT VLLM_TARGET_DEVICE STREQUAL "cuda")
     if (VLLM_TARGET_DEVICE STREQUAL "cpu")
         include(${CMAKE_CURRENT_LIST_DIR}/cmake/cpu_extension.cmake)
     else()
@@ -84,36 +77,15 @@ endif()
 # Set up GPU language and check the torch version and warn if it isn't
 # what is expected.
 #
-if (NOT HIP_FOUND AND CUDA_FOUND)
+if (CUDA_FOUND)
   set(VLLM_GPU_LANG "CUDA")
 
   if (NOT Torch_VERSION VERSION_EQUAL ${TORCH_SUPPORTED_VERSION_CUDA})
     message(WARNING "Pytorch version ${TORCH_SUPPORTED_VERSION_CUDA} "
       "expected for CUDA build, saw ${Torch_VERSION} instead.")
   endif()
-elseif(HIP_FOUND)
-  set(VLLM_GPU_LANG "HIP")
-
-  # Importing torch recognizes and sets up some HIP/ROCm configuration but does
-  # not let cmake recognize .hip files. In order to get cmake to understand the
-  # .hip extension automatically, HIP must be enabled explicitly.
-  enable_language(HIP)
-
-  # ROCm 5.x
-  if (ROCM_VERSION_DEV_MAJOR EQUAL 5 AND
-      NOT Torch_VERSION VERSION_EQUAL ${TORCH_SUPPORTED_VERSION_ROCM_5X})
-    message(WARNING "Pytorch version ${TORCH_SUPPORTED_VERSION_ROCM_5X} "
-      "expected for ROCMm 5.x build, saw ${Torch_VERSION} instead.")
-  endif()
-
-  # ROCm 6.x
-  if (ROCM_VERSION_DEV_MAJOR EQUAL 6 AND
-      NOT Torch_VERSION VERSION_EQUAL ${TORCH_SUPPORTED_VERSION_ROCM_6X})
-    message(WARNING "Pytorch version ${TORCH_SUPPORTED_VERSION_ROCM_6X} "
-      "expected for ROCMm 6.x build, saw ${Torch_VERSION} instead.")
-  endif()
 else()
-  message(FATAL_ERROR "Can't find CUDA or HIP installation.")
+  message(FATAL_ERROR "Can't find CUDA installation.")
 endif()
 
 #
@@ -161,41 +133,38 @@ set(VLLM_EXT_SRC
   "csrc/moe_align_block_size_kernels.cu"
   "csrc/torch_bindings.cpp")
 
-if(VLLM_GPU_LANG STREQUAL "CUDA")
-  include(FetchContent)
-  SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
-  FetchContent_Declare(
-        cutlass
-        GIT_REPOSITORY https://github.com/nvidia/cutlass.git
-        # CUTLASS 3.5.0
-        GIT_TAG 7d49e6c7e2f8896c47f586706e67e1fb215529dc
-  )
-  FetchContent_MakeAvailable(cutlass)
+include(FetchContent)
+SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
+FetchContent_Declare(
+      cutlass
+      GIT_REPOSITORY https://github.com/nvidia/cutlass.git
+      # CUTLASS 3.5.0
+      GIT_TAG 7d49e6c7e2f8896c47f586706e67e1fb215529dc
+)
+FetchContent_MakeAvailable(cutlass)
 
-  list(APPEND VLLM_EXT_SRC
-    "csrc/quantization/aqlm/gemm_kernels.cu"
-    "csrc/quantization/awq/gemm_kernels.cu"
-    "csrc/quantization/marlin/dense/marlin_cuda_kernel.cu"
-    "csrc/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
-    "csrc/quantization/gptq_marlin/gptq_marlin.cu"
-    "csrc/quantization/gptq_marlin/gptq_marlin_repack.cu"
-    "csrc/custom_all_reduce.cu"
-    "csrc/quantization/cutlass_w8a8/scaled_mm_entry.cu"
-    "csrc/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
-    "csrc/quantization/cutlass_w8a8/scaled_mm_c3x.cu")
+list(APPEND VLLM_EXT_SRC
+  "csrc/quantization/aqlm/gemm_kernels.cu"
+  "csrc/quantization/awq/gemm_kernels.cu"
+  "csrc/quantization/marlin/dense/marlin_cuda_kernel.cu"
+  "csrc/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
+  "csrc/quantization/gptq_marlin/gptq_marlin.cu"
+  "csrc/quantization/gptq_marlin/gptq_marlin_repack.cu"
+  "csrc/custom_all_reduce.cu"
+  "csrc/quantization/cutlass_w8a8/scaled_mm_entry.cu"
+  "csrc/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
+  "csrc/quantization/cutlass_w8a8/scaled_mm_c3x.cu")
 
-  #
-  # The CUTLASS kernels for Hopper require sm90a to be enabled.
-  # This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
-  # That adds an extra 17MB to compiled binary, so instead we selectively enable it.
-  if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
-    set_source_files_properties(
-          "csrc/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
-          PROPERTIES
-          COMPILE_FLAGS
-          "-gencode arch=compute_90a,code=sm_90a -lineinfo")
-  endif()
-
+#
+# The CUTLASS kernels for Hopper require sm90a to be enabled.
+# This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
+# That adds an extra 17MB to compiled binary, so instead we selectively enable it.
+if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
+  set_source_files_properties(
+        "csrc/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
+        PROPERTIES
+        COMPILE_FLAGS
+        "-gencode arch=compute_90a,code=sm_90a -lineinfo")
 endif()
 
 define_gpu_extension_target(
@@ -254,19 +223,14 @@ list(REMOVE_ITEM VLLM_PUNICA_GPU_FLAGS
 #
 # Filter out CUDA architectures < 8.0 for punica.
 #
-if (${VLLM_GPU_LANG} STREQUAL "CUDA")
-  set(VLLM_PUNICA_GPU_ARCHES)
-  foreach(ARCH ${VLLM_GPU_ARCHES})
-    string_to_ver(CODE_VER ${ARCH})
-    if (CODE_VER GREATER_EQUAL 8.0)
-      list(APPEND VLLM_PUNICA_GPU_ARCHES ${ARCH})
-    endif()
-  endforeach()
-  message(STATUS "Punica target arches: ${VLLM_PUNICA_GPU_ARCHES}")
-elseif(${VLLM_GPU_LANG} STREQUAL "HIP")
-  set(VLLM_PUNICA_GPU_ARCHES ${VLLM_GPU_ARCHES})
-  message(STATUS "Punica target arches: ${VLLM_PUNICA_GPU_ARCHES}")
-endif()
+set(VLLM_PUNICA_GPU_ARCHES)
+foreach(ARCH ${VLLM_GPU_ARCHES})
+  string_to_ver(CODE_VER ${ARCH})
+  if (CODE_VER GREATER_EQUAL 8.0)
+    list(APPEND VLLM_PUNICA_GPU_ARCHES ${ARCH})
+  endif()
+endforeach()
+message(STATUS "Punica target arches: ${VLLM_PUNICA_GPU_ARCHES}")
 
 if (VLLM_PUNICA_GPU_ARCHES)
   define_gpu_extension_target(
@@ -298,21 +262,17 @@ endif()
 #
 add_custom_target(default)
 
-if(VLLM_GPU_LANG STREQUAL "CUDA" OR VLLM_GPU_LANG STREQUAL "HIP")
-  message(STATUS "Enabling C extension.")
-  add_dependencies(default _C)
+message(STATUS "Enabling C extension.")
+add_dependencies(default _C)
 
-  message(STATUS "Enabling moe extension.")
-  add_dependencies(default _moe_C)
+message(STATUS "Enabling moe extension.")
+add_dependencies(default _moe_C)
 
-  # Enable punica if -DVLLM_INSTALL_PUNICA_KERNELS=ON or
-  # VLLM_INSTALL_PUNICA_KERNELS is set in the environment and
-  # there are supported target arches.
-  if (VLLM_PUNICA_GPU_ARCHES AND
-      (ENV{VLLM_INSTALL_PUNICA_KERNELS} OR VLLM_INSTALL_PUNICA_KERNELS))
-    message(STATUS "Enabling punica extension.")
-    add_dependencies(default _punica_C)
-  endif()
+# Enable punica if -DVLLM_INSTALL_PUNICA_KERNELS=ON or
+# VLLM_INSTALL_PUNICA_KERNELS is set in the environment and
+# there are supported target arches.
+if (VLLM_PUNICA_GPU_ARCHES AND
+    (ENV{VLLM_INSTALL_PUNICA_KERNELS} OR VLLM_INSTALL_PUNICA_KERNELS))
+  message(STATUS "Enabling punica extension.")
+  add_dependencies(default _punica_C)
 endif()
-
-

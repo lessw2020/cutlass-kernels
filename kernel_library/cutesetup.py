@@ -423,7 +423,7 @@ if envs.VLLM_USE_PRECOMPILED:
     package_data["vllm"].append("*.so")
 
 setup(
-    name="vllm",
+    name="snowfall",
     version=1.624,
     author="Cute Kernel Team",
     license="Apache 2.0",

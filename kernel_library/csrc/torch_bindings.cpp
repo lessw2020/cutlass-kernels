@@ -4,6 +4,8 @@
 #include "registration.h"
 
 #include <torch/library.h>
+#include <torch/all.h>
+#include <cstdint>
 
 // Note on op signatures:
 // The X_meta signatures are for the meta functions corresponding to op X.

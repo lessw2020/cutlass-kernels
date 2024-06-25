@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # cannot import envs directly because it depends on vllm,
 #  which is not installed yet
-envs = load_module_from_path('cuteenvs', os.path.join(ROOT_DIR, 'vllm', 'envs.py'))
+envs = load_module_from_path('cuteenvs', os.path.join(ROOT_DIR, 'cuteenvs.py'))
 #print(f"{envs.__dir__()=}")
 #assert False, "good"
 VLLM_TARGET_DEVICE = envs.VLLM_TARGET_DEVICE

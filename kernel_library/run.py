@@ -1,5 +1,5 @@
 #import vllm
-from vllm._custom_ops import cutlass_scaled_mm
+from custom_ops import cutlass_scaled_mm
 import torch
 
 m, k, n = 16, 4096, 4096

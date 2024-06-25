@@ -120,17 +120,7 @@ endif()
 #
 
 set(VLLM_EXT_SRC
-  "csrc/cache_kernels.cu"
-  "csrc/attention/attention_kernels.cu"
-  "csrc/pos_encoding_kernels.cu"
-  "csrc/activation_kernels.cu"
-  "csrc/layernorm_kernels.cu"
-  "csrc/quantization/squeezellm/quant_cuda_kernel.cu"
-  "csrc/quantization/gptq/q_gemm.cu"
-  "csrc/quantization/compressed_tensors/int8_quant_kernels.cu"
-  "csrc/quantization/fp8/common.cu"
   "csrc/cuda_utils_kernels.cu"
-  "csrc/moe_align_block_size_kernels.cu"
   "csrc/torch_bindings.cpp")
 
 include(FetchContent)
@@ -144,15 +134,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cutlass)
 
 list(APPEND VLLM_EXT_SRC
-  "csrc/quantization/aqlm/gemm_kernels.cu"
-  "csrc/quantization/awq/gemm_kernels.cu"
-  "csrc/quantization/marlin/dense/marlin_cuda_kernel.cu"
-  "csrc/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
-  "csrc/quantization/gptq_marlin/gptq_marlin.cu"
-  "csrc/quantization/gptq_marlin/gptq_marlin_repack.cu"
-  "csrc/custom_all_reduce.cu"
   "csrc/quantization/cutlass_w8a8/scaled_mm_entry.cu"
-  "csrc/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
   "csrc/quantization/cutlass_w8a8/scaled_mm_c3x.cu")
 
 #

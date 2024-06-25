@@ -77,15 +77,5 @@ void cutlass_scaled_mm(torch::Tensor& c, torch::Tensor const& a,
 #else
     cutlass_scaled_mm_sm80(c, a, b, a_scales, b_scales);
 #endif
-  } else if (version_num == 89) {
-    // Ada Lovelace
-    cutlass_scaled_mm_sm89(c, a, b, a_scales, b_scales);
-  } else if (version_num >= 80) {
-    // Ampere
-    cutlass_scaled_mm_sm80(c, a, b, a_scales, b_scales);
-  } else {
-    // Turing
-    TORCH_CHECK(version_num >= 75);
-    cutlass_scaled_mm_sm75(c, a, b, a_scales, b_scales);
   }
 }

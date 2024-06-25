@@ -1,0 +1,202 @@
+# from VLLLM, modified by Adnan:
+cmake_minimum_required(VERSION 3.21)
+
+project(vllm_extensions LANGUAGES CXX)
+
+option(VLLM_TARGET_DEVICE "Target device backend for vLLM" "cuda")
+
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Target device: ${VLLM_TARGET_DEVICE}")
+
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/utils.cmake)
+
+#
+# Supported python versions.  These versions will be searched in order, the
+# first match will be selected.  These should be kept in sync with setup.py.
+#
+set(PYTHON_SUPPORTED_VERSIONS "3.9" "3.10" "3.11")
+
+# Supported NVIDIA architectures.
+set(CUDA_SUPPORTED_ARCHS "8.0;8.6;8.9;9.0")
+
+#
+# Supported/expected torch versions for CUDA.
+#
+# Currently, having an incorrect pytorch version results in a warning
+# rather than an error.
+#
+# Note: the CUDA torch version is derived from pyproject.toml and various
+# requirements.txt files and should be kept consistent.
+#
+set(TORCH_SUPPORTED_VERSION_CUDA "2.3.0")
+
+#
+# Try to find python package with an executable that exactly matches
+# `VLLM_PYTHON_EXECUTABLE` and is one of the supported versions.
+#
+if (VLLM_PYTHON_EXECUTABLE)
+  find_python_from_executable(${VLLM_PYTHON_EXECUTABLE} "${PYTHON_SUPPORTED_VERSIONS}")
+else()
+  message(FATAL_ERROR
+    "Please set VLLM_PYTHON_EXECUTABLE to the path of the desired python version"
+    " before running cmake configure.")
+endif()
+
+#
+# Update cmake's `CMAKE_PREFIX_PATH` with torch location.
+#
+append_cmake_prefix_path("torch" "torch.utils.cmake_prefix_path")
+
+# Ensure the 'nvcc' command is in the PATH
+find_program(NVCC_EXECUTABLE nvcc)
+if (CUDA_FOUND AND NOT NVCC_EXECUTABLE)
+    message(FATAL_ERROR "nvcc not found")
+endif()
+
+#
+# Import torch cmake configuration.
+# Torch also imports CUDA language with some customizations,
+# so there is no need to do this explicitly with check_language/enable_language,
+# etc.
+#
+find_package(Torch REQUIRED)
+
+#
+# Forward the non-CUDA device extensions to external CMake scripts.
+#
+if (NOT VLLM_TARGET_DEVICE STREQUAL "cuda")
+    if (VLLM_TARGET_DEVICE STREQUAL "cpu")
+        include(${CMAKE_CURRENT_LIST_DIR}/cmake/cpu_extension.cmake)
+    else()
+        message(FATAL_ERROR "Unsupported vLLM target device: ${VLLM_TARGET_DEVICE}")
+    endif()
+    return()
+endif()
+
+#
+# Set up GPU language and check the torch version and warn if it isn't
+# what is expected.
+#
+if (CUDA_FOUND)
+  set(VLLM_GPU_LANG "CUDA")
+
+  if (NOT Torch_VERSION VERSION_EQUAL ${TORCH_SUPPORTED_VERSION_CUDA})
+    message(WARNING "Pytorch version ${TORCH_SUPPORTED_VERSION_CUDA} "
+      "expected for CUDA build, saw ${Torch_VERSION} instead.")
+  endif()
+else()
+  message(FATAL_ERROR "Can't find CUDA installation.")
+endif()
+
+#
+# Override the GPU architectures detected by cmake/torch and filter them by
+# the supported versions for the current language.
+# The final set of arches is stored in `VLLM_GPU_ARCHES`.
+#
+override_gpu_arches(VLLM_GPU_ARCHES
+  ${VLLM_GPU_LANG}
+  "${${VLLM_GPU_LANG}_SUPPORTED_ARCHS}")
+
+#
+# Query torch for additional GPU compilation flags for the given
+# `VLLM_GPU_LANG`.
+# The final set of arches is stored in `VLLM_GPU_FLAGS`.
+#
+get_torch_gpu_compiler_flags(VLLM_GPU_FLAGS ${VLLM_GPU_LANG})
+
+#
+# Set nvcc parallelism.
+#
+if(NVCC_THREADS AND VLLM_GPU_LANG STREQUAL "CUDA")
+  list(APPEND VLLM_GPU_FLAGS "--threads=${NVCC_THREADS}")
+endif()
+
+#
+# Define extension targets
+#
+
+#
+# _C extension
+#
+
+set(VLLM_EXT_SRC
+  "csrc/cache_kernels.cu"
+  "csrc/attention/attention_kernels.cu"
+  "csrc/pos_encoding_kernels.cu"
+  "csrc/activation_kernels.cu"
+  "csrc/layernorm_kernels.cu"
+  "csrc/quantization/squeezellm/quant_cuda_kernel.cu"
+  "csrc/quantization/gptq/q_gemm.cu"
+  "csrc/quantization/compressed_tensors/int8_quant_kernels.cu"
+  "csrc/quantization/fp8/common.cu"
+  "csrc/cuda_utils_kernels.cu"
+  "csrc/moe_align_block_size_kernels.cu"
+  "csrc/torch_bindings.cpp")
+
+include(FetchContent)
+SET(CUTLASS_ENABLE_HEADERS_ONLY=ON)
+FetchContent_Declare(
+      cutlass
+      GIT_REPOSITORY https://github.com/nvidia/cutlass.git
+      # CUTLASS 3.5.0
+      GIT_TAG 7d49e6c7e2f8896c47f586706e67e1fb215529dc
+)
+FetchContent_MakeAvailable(cutlass)
+
+list(APPEND VLLM_EXT_SRC
+  "csrc/quantization/aqlm/gemm_kernels.cu"
+  "csrc/quantization/awq/gemm_kernels.cu"
+  "csrc/quantization/marlin/dense/marlin_cuda_kernel.cu"
+  "csrc/quantization/marlin/sparse/marlin_24_cuda_kernel.cu"
+  "csrc/quantization/gptq_marlin/gptq_marlin.cu"
+  "csrc/quantization/gptq_marlin/gptq_marlin_repack.cu"
+  "csrc/custom_all_reduce.cu"
+  "csrc/quantization/cutlass_w8a8/scaled_mm_entry.cu"
+  "csrc/quantization/cutlass_w8a8/scaled_mm_c2x.cu"
+  "csrc/quantization/cutlass_w8a8/scaled_mm_c3x.cu")
+
+#
+# The CUTLASS kernels for Hopper require sm90a to be enabled.
+# This is done via the below gencode option, BUT that creates kernels for both sm90 and sm90a.
+# That adds an extra 17MB to compiled binary, so instead we selectively enable it.
+if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER 12.0)
+  set_source_files_properties(
+        "csrc/quantization/cutlass_w8a8/scaled_mm_c3x.cu"
+        PROPERTIES
+        COMPILE_FLAGS
+        "-gencode arch=compute_90a,code=sm_90a -lineinfo")
+endif()
+
+define_gpu_extension_target(
+  _C
+  DESTINATION vllm
+  LANGUAGE ${VLLM_GPU_LANG}
+  SOURCES ${VLLM_EXT_SRC}
+  COMPILE_FLAGS ${VLLM_GPU_FLAGS}
+  ARCHITECTURES ${VLLM_GPU_ARCHES}
+  INCLUDE_DIRECTORIES ${CUTLASS_INCLUDE_DIR};${CUTLASS_TOOLS_UTIL_INCLUDE_DIR}
+  USE_SABI 3
+  WITH_SOABI)
+
+
+
+#
+# Add the `default` target which detects which extensions should be
+# built based on platform/architecture.  This is the same logic that
+# setup.py uses to select which extensions should be built and should
+# be kept in sync.
+#
+# The `default` target makes direct use of cmake easier since knowledge
+# of which extensions are supported has been factored in, e.g.
+#
+# mkdir build && cd build
+# cmake -G Ninja -DVLLM_PYTHON_EXECUTABLE=`which python3` -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=../vllm ..
+# cmake --build . --target default
+#
+add_custom_target(default)
+
+message(STATUS "Enabling C extension.")
+add_dependencies(default _C)
+
+#message(STATUS "Enabling moe extension.")
+#add_dependencies(default _moe_C)

@@ -5,7 +5,7 @@ setup(
     name='cutlass_gemm',
     ext_modules=[
         CUDAExtension(
-            name='cutlass_gemm',
+            name='pingpong_gemm',
             sources=['cutlass.cpp', 'cutlass_kernel.cu'],
             extra_compile_args={
                 'nvcc': [
@@ -23,11 +23,11 @@ setup(
                 ]
             },
             include_dirs=[
-                '/home/adhoq26/cutlass/include',
-                '/home/adhoq26/cutlass/tools/util/include',
+                '/data/users/less/local/cutlass_local/include',
+                '/data/users/less/local/cutlass_local/tools/util/include',
             ],
             libraries=['cuda'],
-            library_dirs=['/usr/local/cuda-12.4/lib64'],
+            library_dirs=['/usr/local/cuda-12.3/lib64'],
         )
     ],
     cmdclass={
